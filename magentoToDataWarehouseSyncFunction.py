@@ -146,7 +146,21 @@ def postCustomerInfoToDwh(customerInfo,flag):
         customerCorrelationInsertBody={'query':helpers.customerCorrelationInsertQuery,'variables':customerCorrelationInsertVariables}
         response=postData(graphQlUrl,customerCorrelationInsertBody,HEADERS)
         logger.info("Correlation table updated")
-    
+
+        #insert into address table
+        if len(customerInfo['address'])>0:
+            for i in range(len(customerInfo['address'])):
+                address=customerInfo['address'][i]['street']
+                city=customerInfo['address'][i]['city']
+                stateCode=customerInfo['address'][i]['region']['region_code']
+                countryCode=customerInfo['address'][i]['country_id']
+                pincode=int(customerInfo['address'][i]['postcode'])
+                source='adhoc'
+                customerAddressTableInsertVariables={"address_1": address, "city": city, "country_code": countryCode, "customer_id": dwhCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
+                customerAddressTableInsertBody={'query':helpers.customerAddressTableInsertQuery,'variables':customerAddressTableInsertVariables}
+                response=postData(graphQlUrl,customerAddressTableInsertBody,HEADERS)
+
+            
     if flag==0:
         
         # checking if any field has to be updated
@@ -200,8 +214,28 @@ def postCustomerInfoToDwh(customerInfo,flag):
                         phoneNumberList.append(number)
             else:
                 phoneNumberList=tempPhoneNumberList
+
+        #deleting the existing customer address and updating new one
+        source='adhoc'
+        customerAddressDeleteVariables={"source":source,"customer_id":dwhCustomerId}
+        customerAddressDeleteBody={'query':helpers.customerAddressDeleteQuery,'variables':customerAddressDeleteVariables}
+        response=postData(graphQlUrl,customerAddressDeleteBody,HEADERS)
+        if len(customerInfo['address'])>0:
+            for i in range(len(customerInfo['address'])):
+                address=customerInfo['address'][i]['street']
+                city=customerInfo['address'][i]['city']
+                stateCode=customerInfo['address'][i]['region']['region_code']
+                countryCode=customerInfo['address'][i]['country_id']
+                pincode=int(customerInfo['address'][i]['postcode'])
+                source='adhoc'
+                customerAddressTableInsertVariables={"address_1": address, "city": city, "country_code": countryCode, "customer_id": dwhCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
+                customerAddressTableInsertBody={'query':helpers.customerAddressTableInsertQuery,'variables':customerAddressTableInsertVariables}
+                response=postData(graphQlUrl,customerAddressTableInsertBody,HEADERS)
+
                     
-    updateCustomerPhoneTable(phoneNumberList,dwhCustomerId)        
+    updateCustomerPhoneTable(phoneNumberList,dwhCustomerId)
+
+
     
         
 def updateCustomerPhoneTable(phoneNumberList,dwhCustomerId):
