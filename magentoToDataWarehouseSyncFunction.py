@@ -18,7 +18,6 @@ HEADERS = {
 }
 
 def lambda_handler(event, context):
-    # To DO
     logger.info(event)
     global env
     
@@ -146,21 +145,21 @@ def postCustomerInfoToDwh(customerInfo,flag):
         customerCorrelationInsertBody={'query':helpers.customerCorrelationInsertQuery,'variables':customerCorrelationInsertVariables}
         response=postData(graphQlUrl,customerCorrelationInsertBody,HEADERS)
         logger.info("Correlation table updated")
-
+        
         #insert into address table
-        if len(customerInfo['address'])>0:
-            for i in range(len(customerInfo['address'])):
-                address=customerInfo['address'][i]['street']
-                city=customerInfo['address'][i]['city']
-                stateCode=customerInfo['address'][i]['region']['region_code']
-                countryCode=customerInfo['address'][i]['country_id']
-                pincode=int(customerInfo['address'][i]['postcode'])
+        if len(customerInfo['addresses'])>0:
+            for i in range(len(customerInfo['addresses'])):
+                address=customerInfo['addresses'][i]['street'][0]
+                city=customerInfo['addresses'][i]['city']
+                stateCode=customerInfo['addresses'][i]['region']['region_code']
+                countryCode=customerInfo['addresses'][i]['country_id']
+                pincode=int(customerInfo['addresses'][i]['postcode'])
                 source='adhoc'
                 customerAddressTableInsertVariables={"address_1": address, "city": city, "country_code": countryCode, "customer_id": dwhCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
                 customerAddressTableInsertBody={'query':helpers.customerAddressTableInsertQuery,'variables':customerAddressTableInsertVariables}
                 response=postData(graphQlUrl,customerAddressTableInsertBody,HEADERS)
-
-            
+                logger.info(response)
+        
     if flag==0:
         
         # checking if any field has to be updated
@@ -214,28 +213,29 @@ def postCustomerInfoToDwh(customerInfo,flag):
                         phoneNumberList.append(number)
             else:
                 phoneNumberList=tempPhoneNumberList
-
+                
         #deleting the existing customer address and updating new one
         source='adhoc'
         customerAddressDeleteVariables={"source":source,"customer_id":dwhCustomerId}
         customerAddressDeleteBody={'query':helpers.customerAddressDeleteQuery,'variables':customerAddressDeleteVariables}
         response=postData(graphQlUrl,customerAddressDeleteBody,HEADERS)
-        if len(customerInfo['address'])>0:
-            for i in range(len(customerInfo['address'])):
-                address=customerInfo['address'][i]['street']
-                city=customerInfo['address'][i]['city']
-                stateCode=customerInfo['address'][i]['region']['region_code']
-                countryCode=customerInfo['address'][i]['country_id']
-                pincode=int(customerInfo['address'][i]['postcode'])
+        logger.info(customerAddressDeleteVariables)
+        logger.info("old records deleted")
+        logger.info(response)
+        if len(customerInfo['addresses'])>0:
+            for i in range(len(customerInfo['addresses'])):
+                address=customerInfo['addresses'][i]['street'][0]
+                city=customerInfo['addresses'][i]['city']
+                stateCode=customerInfo['addresses'][i]['region']['region_code']
+                countryCode=customerInfo['addresses'][i]['country_id']
+                pincode=int(customerInfo['addresses'][i]['postcode'])
                 source='adhoc'
                 customerAddressTableInsertVariables={"address_1": address, "city": city, "country_code": countryCode, "customer_id": dwhCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
                 customerAddressTableInsertBody={'query':helpers.customerAddressTableInsertQuery,'variables':customerAddressTableInsertVariables}
                 response=postData(graphQlUrl,customerAddressTableInsertBody,HEADERS)
-
+                logger.info(response)
                     
-    updateCustomerPhoneTable(phoneNumberList,dwhCustomerId)
-
-
+    updateCustomerPhoneTable(phoneNumberList,dwhCustomerId)        
     
         
 def updateCustomerPhoneTable(phoneNumberList,dwhCustomerId):

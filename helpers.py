@@ -76,8 +76,8 @@ customerAddressTableInsertQuery="""mutation MyMutation($address_1: String!, $cit
 }
 """
 
-customerAddressDeleteQuery="""mutation MyMutation($_source: String!, $_customer_id: Int!) {
-  delete_admin_customer_address(where: {source: {_eq: $_source}, _and: {customer_id: {_eq: $_customer_id}}}) {
+customerAddressDeleteQuery="""mutation MyMutation($source: String!, $customer_id: Int!) {
+  delete_admin_customer_address(where: {source: {_eq: $source}, _and: {customer_id: {_eq: $customer_id}}}) {
     affected_rows
   }
 }
