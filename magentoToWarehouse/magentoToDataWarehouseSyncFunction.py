@@ -4,13 +4,14 @@ import os
 import urllib3
 import helpers
 from collections import namedtuple
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 http = urllib3.PoolManager()
 
 warehouseGraphQlEndpoint = os.environ['GRAPHQL_ENDPOINT']
-warehouseGraphQlUrl = warehouseGraphQlEndpoint+'/v1/graphql'
+warehouseGraphQlUrl = warehouseGraphQlEndpoint + '/v1/graphql'
 accessKey = os.environ['GRAPHQL_ADMIN_SECRET']
 HEADERS = {
     'Content-Type': 'application/json',
@@ -23,8 +24,6 @@ def lambda_handler(event, context):
     global env
 
     logger.info("New customer sync to warehouse invoked by a lambda...")
-
-    logger.info(event)
     customerId = event["customerId"]
     env = event["env"]
 
@@ -96,8 +95,6 @@ def getCustomerInfoFromMagento(customerId):
 
         logger.info("Customer information received successfully " +
                     str(response["id"]))
-        # logger.info(str(response))
-
         return response
 
     except Exception as e:
@@ -106,7 +103,7 @@ def getCustomerInfoFromMagento(customerId):
 
 
 def postCustomerInfoToWarehouse(customerInfo, customerExists):
-    phoneNumberList = []
+    logger.info(customerExists)
     if customerExists == False:
         # insert into customer table
         customerId = customerInfo['id']
@@ -114,21 +111,12 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
         lastName = customerInfo['lastname']
         email = customerInfo['email']
         email = email.lower()
-        phoneNumber = ""
-        if len(customerInfo['addresses']) > 0:
-            if 'telephone' in customerInfo['addresses'][0]:
-                phoneNumber = customerInfo['addresses'][0]['telephone']
-
-        if len(customerInfo['addresses']) > 1:
-            for i in range(1, len(customerInfo['addresses'])):
-                phoneNumberList.append(
-                    customerInfo['addresses'][i]['telephone'])
         if 'gender' in customerInfo:
             gender = str(customerInfo['gender'])
         else:
             gender = ""
-        customerInsertVariables = {"first_name": firstName, "gender": gender,
-                                   "last_name": lastName, "primary_email": email, "primary_phone": phoneNumber}
+        customerInsertVariables = {
+            "first_name": firstName, "gender": gender, "last_name": lastName, "primary_email": email}
         if 'dob' in customerInfo:
             dateOfBirth = customerInfo['dob']
             customerInsertVariables['date_of_birth'] = dateOfBirth
@@ -136,9 +124,10 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
         customerInsertBody = {
             'query': helpers.customerTableInsertQuery, 'variables': customerInsertVariables}
         response = postData(warehouseGraphQlUrl, customerInsertBody, HEADERS)
-        logger.info("Customer Data uploaded in Warehouse")
+        logger.info("Customer Data for customer ID " +
+                    str(customerId) + " uploaded in Warehouse")
 
-        # query Warehouse customerId
+        #query Warehouse customerId
         email = customerInfo['email']
         email = email.lower()
         customerCorrelationVariables = {"primary_email": email}
@@ -148,17 +137,18 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
                             customerCorrelationBody, HEADERS)
         warehouseCustomerId = response['data']['admin_customer'][0]['customer_id']
 
-        # insert into correlation table
+        #insert into correlation table
         adhocCustomerId = customerInfo['id']
+        updatedAt = datetime.now()
         customerCorrelationInsertVariables = {
-            "adhoc_customer_id": adhocCustomerId, "customer_id": warehouseCustomerId}
+            "adhoc_customer_id": adhocCustomerId, "customer_id": warehouseCustomerId, "updated_at": updatedAt}
         customerCorrelationInsertBody = {
             'query': helpers.customerCorrelationInsertQuery, 'variables': customerCorrelationInsertVariables}
         response = postData(warehouseGraphQlUrl,
                             customerCorrelationInsertBody, HEADERS)
-        logger.info("Correlation table updated")
+        logger.info("Correlation table updated in warehouse")
 
-        # insert into address table
+        #insert into address table
         if len(customerInfo['addresses']) > 0:
             for i in range(len(customerInfo['addresses'])):
                 address = customerInfo['addresses'][i]['street'][0]
@@ -166,17 +156,16 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
                 stateCode = customerInfo['addresses'][i]['region']['region_code']
                 countryCode = customerInfo['addresses'][i]['country_id']
                 pincode = int(customerInfo['addresses'][i]['postcode'])
+                phoneNumber = customerInfo['addresses'][i]['telephone']
                 source = 'adhoc'
-                customerAddressTableInsertVariables = {"address_1": address, "city": city, "country_code": countryCode,
-                                                       "customer_id": warehouseCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
-                customerAddressTableInsertBody = {
-                    'query': helpers.customerAddressTableInsertQuery, 'variables': customerAddressTableInsertVariables}
+                customerContactTableInsertVariables = {"address_1": address, "city": city, "country_code": countryCode,
+                                                       "customer_id": warehouseCustomerId, "phone": phoneNumber, "pincode": pincode, "source": source, "state_code": stateCode}
+                customerContactTableInsertBody = {
+                    'query': helpers.customerContactTableInsertQuery, 'variables': customerContactTableInsertVariables}
                 response = postData(warehouseGraphQlUrl,
-                                    customerAddressTableInsertBody, HEADERS)
-                logger.info(response)
+                                    customerContactTableInsertBody, HEADERS)
 
     else:
-
         # checking if any field has to be updated
         email = customerInfo['email']
         email = email.lower()
@@ -185,10 +174,8 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
             'query': helpers.validationQuery, 'variables': validationQueryVariables}
         response = postData(warehouseGraphQlUrl, validationQueryBody, HEADERS)
         warehouseCustomerId = response['data']['admin_customer'][0]['customer_id']
-        logger.info(response)
         tempDateOfBirth = response['data']['admin_customer'][0]['date_of_birth']
         tempGender = response['data']['admin_customer'][0]['gender']
-        tempPhoneNumber = response['data']['admin_customer'][0]['primary_phone']
         if 'dob' in customerInfo:
             dateOfBirth = customerInfo['dob']
             customerUpdateVariables = {
@@ -198,100 +185,61 @@ def postCustomerInfoToWarehouse(customerInfo, customerExists):
             response = postData(warehouseGraphQlUrl,
                                 customerUpdateBody, HEADERS)
         if 'gender' in customerInfo:
-            gender = str(customerInfo['gender'])
+            if customerInfo['gender'] == 1:
+                gender = 'Male'
+            if customerInfo['gender'] == 2:
+                gender = 'Female'
+            if customerInfo['gender'] == 3:
+                gender = 'Not specified'
+        else:
+            gender = ""
+
             customerUpdateVariables = {"email": email, "gender": gender}
             customerUpdateBody = {
                 'query': helpers.customerGenderUpdateQuery, 'variables': customerUpdateVariables}
             response = postData(warehouseGraphQlUrl,
                                 customerUpdateBody, HEADERS)
-        if len(customerInfo['addresses']) > 0:
-            if 'telephone' in customerInfo['addresses'][0]:
-                phoneNumber = customerInfo['addresses'][0]['telephone']
-                customerUpdateVariables = {
-                    "email": email, "primary_phone": phoneNumber}
-                customerUpdateBody = {
-                    'query': helpers.customerPhoneUpdateQuery, 'variables': customerUpdateVariables}
-                response = postData(warehouseGraphQlUrl,
-                                    customerUpdateBody, HEADERS)
 
         # update in correlation table
         adhocCustomerId = customerInfo['id']
+        updatedAt = datetime.now()
         customerCorrelationUpdateVariables = {
-            "customer_id": warehouseCustomerId, "adhoc_customer_id": adhocCustomerId}
+            "customer_id": warehouseCustomerId, "adhoc_customer_id": adhocCustomerId, "updated_at": updatedAt}
         customerCorrelationUpdateBody = {
             'query': helpers.customerCorrelationUpdateQuery, 'variables': customerCorrelationUpdateVariables}
         response = postData(warehouseGraphQlUrl,
                             customerCorrelationUpdateBody, HEADERS)
-        logger.info("Correlation table updated")
+        logger.info("Correlation table updated in the warehouse")
 
-        # getting list of phone numbers and inserting the ones that are not present already
-        tempPhoneNumberList = []
-        phoneNumberValidationList = []
-        if len(customerInfo['addresses']) > 1:
-            for i in range(1, len(customerInfo['addresses'])):
-                tempPhoneNumberList.append(
-                    customerInfo['addresses'][i]['telephone'])
-            customerPhoneValidationVariables = {
-                "customer_id": warehouseCustomerId}
-            customerPhoneValidationBody = {
-                'query': helpers.customerPhoneValidationQuery, 'variables': customerPhoneValidationVariables}
-            response = postData(warehouseGraphQlUrl,
-                                customerPhoneValidationBody, HEADERS)
-            logger.info(response)
-            if len(response['data']['admin_customer_phone']) > 0:
-                for j in range(1, len(response['data']['admin_customer_phone'])):
-                    phoneNumberValidationList.append(
-                        response['data']['admin_customer_phone'][j]['customer_phone'])
-                for number in tempPhoneNumberList:
-                    if number not in phoneNumberValidationList:
-                        phoneNumberList.append(number)
-            else:
-                phoneNumberList = tempPhoneNumberList
-
-        # deleting the existing customer address and updating new one
+        #deleting the existing customer address and updating new one
         source = 'adhoc'
-        customerAddressDeleteVariables = {
+        customerContactDeleteVariables = {
             "source": source, "customer_id": warehouseCustomerId}
-        customerAddressDeleteBody = {
-            'query': helpers.customerAddressDeleteQuery, 'variables': customerAddressDeleteVariables}
+        customerContactDeleteBody = {
+            'query': helpers.customerContactDeleteQuery, 'variables': customerContactDeleteVariables}
         response = postData(warehouseGraphQlUrl,
-                            customerAddressDeleteBody, HEADERS)
-        logger.info(customerAddressDeleteVariables)
-        logger.info("old records deleted")
-        logger.info(response)
+                            customerContactDeleteBody, HEADERS)
         if len(customerInfo['addresses']) > 0:
             for i in range(len(customerInfo['addresses'])):
                 address = customerInfo['addresses'][i]['street'][0]
                 city = customerInfo['addresses'][i]['city']
                 stateCode = customerInfo['addresses'][i]['region']['region_code']
                 countryCode = customerInfo['addresses'][i]['country_id']
+                phoneNumber = customerInfo['addresses'][i]['telephone']
                 pincode = int(customerInfo['addresses'][i]['postcode'])
                 source = 'adhoc'
-                customerAddressTableInsertVariables = {"address_1": address, "city": city, "country_code": countryCode,
-                                                       "customer_id": warehouseCustomerId, "pincode": pincode, "source": source, "state_code": stateCode}
-                customerAddressTableInsertBody = {
-                    'query': helpers.customerAddressTableInsertQuery, 'variables': customerAddressTableInsertVariables}
+                customerContactTableInsertVariables = {"address_1": address, "city": city, "country_code": countryCode,
+                                                       "customer_id": warehouseCustomerId, "phone": phoneNumber,  "pincode": pincode, "source": source, "state_code": stateCode}
+                customerContactTableInsertBody = {
+                    'query': helpers.customerContactTableInsertQuery, 'variables': customerContactTableInsertVariables}
                 response = postData(warehouseGraphQlUrl,
-                                    customerAddressTableInsertBody, HEADERS)
-                logger.info(response)
-
-    updateCustomerPhoneTable(phoneNumberList, warehouseCustomerId)
-
-
-def updateCustomerPhoneTable(phoneNumberList, warehouseCustomerId):
-    for number in phoneNumberList:
-        customerPhoneTableInsertVariables = {
-            "customer_id": warehouseCustomerId, "customer_phone": number}
-        customerPhoneTableInsertBody = {
-            'query': helpers.customerPhoneTableInsertQuery, 'variables': customerPhoneTableInsertVariables}
-        response = postData(warehouseGraphQlUrl,
-                            customerPhoneTableInsertBody, HEADERS)
+                                    customerContactTableInsertBody, HEADERS)
 
 
 def postData(url, body, header):
     encoded_data = ""
     if len(body) > 0:
-        encoded_data = json.dumps(body).encode('utf-8')
+        encoded_data = json.dumps(body, default=myconverter).encode('utf-8')
 
     request = http.request('POST', url, body=encoded_data, headers=header)
     response = json.loads(request.data.decode('utf-8'))
@@ -301,7 +249,6 @@ def postData(url, body, header):
 def validateIfCustomerExistsInWarehouse(customerInfo):
     email = customerInfo['email']
     email = email.lower()
-    logger.info(email)
     customerValidationVariables = {"primary_email": email}
     customerValidationVariablesBody = {
         'query': helpers.customerIdQuery, 'variables': customerValidationVariables}
@@ -312,3 +259,8 @@ def validateIfCustomerExistsInWarehouse(customerInfo):
         return True
     else:
         return False
+
+
+def myconverter(o):
+    if isinstance(o, datetime):
+        return o.__str__()
